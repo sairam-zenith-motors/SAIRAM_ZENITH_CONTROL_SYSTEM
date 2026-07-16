@@ -1,0 +1,98 @@
+#include <Arduino.h>
+
+// Cytron MD20A pins
+#define PWM_PIN   2    // D2
+#define DIR_PIN   21   // D3
+
+// Encoder pins
+#define ENCODER_A_PIN 22  // D4
+#define ENCODER_B_PIN 23  // D5
+
+// PWM configuration
+#define PWM_FREQ      20000
+#define PWM_RES_BITS  8
+
+// Steering angle range
+#define MAX_LEFT_DEG   -25.0
+#define MAX_RIGHT_DEG   25.0
+#define STEERING_DEADBAND_DEG 1.0
+#define MAX_PWM_DUTY 200
+
+#define COMM_TIMEOUT_MS 500
+
+unsigned long lastMessageTime = 0;
+
+volatile long encoderCount = 0;
+
+void IRAM_ATTR onEncoderA() {
+  bool a = digitalRead(ENCODER_A_PIN);
+  bool b = digitalRead(ENCODER_B_PIN);
+  if (a == b) {
+    encoderCount++;
+  } else {
+    encoderCount--;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+
+  pinMode(DIR_PIN, OUTPUT);
+  ledcAttach(PWM_PIN, PWM_FREQ, PWM_RES_BITS);
+
+  pinMode(ENCODER_A_PIN, INPUT_PULLUP);
+  pinMode(ENCODER_B_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_A_PIN), onEncoderA, CHANGE);
+
+  digitalWrite(DIR_PIN, LOW);
+  ledcWrite(PWM_PIN, 0);
+
+  lastMessageTime = millis();
+
+  Serial.println("ESP32 ready. Motor control via Cytron MD20A active.");
+}
+
+void loop() {
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() > 0) {
+      float steeringAngle = line.toFloat();
+      lastMessageTime = millis();
+
+      Serial.print("Received steering angle: ");
+      Serial.print(steeringAngle, 2);
+      Serial.print("  Encoder count: ");
+      Serial.println(encoderCount);
+
+      driveMotor(steeringAngle);
+    }
+  }
+
+  if (millis() - lastMessageTime > COMM_TIMEOUT_MS) {
+    ledcWrite(PWM_PIN, 0);
+  }
+}
+
+void driveMotor(float angleDeg) {
+  if (angleDeg > MAX_RIGHT_DEG) angleDeg = MAX_RIGHT_DEG;
+  if (angleDeg < MAX_LEFT_DEG)  angleDeg = MAX_LEFT_DEG;
+
+  if (fabs(angleDeg) < STEERING_DEADBAND_DEG) {
+    ledcWrite(PWM_PIN, 0);
+    return;
+  }
+
+  bool steerRight = (angleDeg > 0);
+  digitalWrite(DIR_PIN, steerRight ? HIGH : LOW);
+
+  float magnitude = fabs(angleDeg);
+  float maxMagnitude = steerRight ? MAX_RIGHT_DEG : -MAX_LEFT_DEG;
+
+  int pwmDuty = (int)((magnitude / maxMagnitude) * MAX_PWM_DUTY);
+  pwmDuty = constrain(pwmDuty, 0, MAX_PWM_DUTY);
+
+  ledcWrite(PWM_PIN, pwmDuty);
+}
