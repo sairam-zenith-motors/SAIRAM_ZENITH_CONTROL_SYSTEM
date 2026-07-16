@@ -1,0 +1,57 @@
+#include <Arduino.h>
+#include "driver/twai.h"
+
+#define CAN_TX GPIO_NUM_17
+#define CAN_RX GPIO_NUM_16
+
+void setup() {
+
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println("Starting...");
+
+  twai_general_config_t g =
+      TWAI_GENERAL_CONFIG_DEFAULT(
+          CAN_TX,
+          CAN_RX,
+          TWAI_MODE_NORMAL);
+
+  twai_timing_config_t t =
+      TWAI_TIMING_CONFIG_500KBITS();
+
+  twai_filter_config_t f =
+      TWAI_FILTER_CONFIG_ACCEPT_ALL();
+
+  esp_err_t err;
+
+  err = twai_driver_install(&g, &t, &f);
+  Serial.print("Driver Install = ");
+  Serial.println(err);
+
+  err = twai_start();
+  Serial.print("TWAI Start = ");
+  Serial.println(err);
+}
+void loop() {
+    twai_message_t msg;
+
+    if (twai_receive(&msg, pdMS_TO_TICKS(100)) == ESP_OK) {
+
+        Serial.print("ID:0x");
+        Serial.print(msg.identifier, HEX);
+
+        Serial.print(" DLC:");
+        Serial.print(msg.data_length_code);
+
+        Serial.print(" DATA:");
+
+        for (int i = 0; i < msg.data_length_code; i++) {
+            if (msg.data[i] < 16) Serial.print("0");
+            Serial.print(msg.data[i], HEX);
+            Serial.print(" ");
+        }
+
+        Serial.println();
+    }
+}
